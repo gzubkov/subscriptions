@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"subscriptions/internal/models"
@@ -58,19 +59,26 @@ func (h *Handler) CreateSubscription(c *gin.Context) {
 		UserID:      req.UserID,
 		ServiceName: req.ServiceName,
 		Price:       req.Price,
-		StartDate:   req.StartDate,
-		EndDate:     req.EndDate,
+		StartDate:   req.StartDate.ToTime(),
+		EndDate:     nil,
 	}
 
-	err := h.storage.CreateSubscription(c.Request.Context(), subscription)
+	if req.EndDate != nil {
+		endDate := req.EndDate.ToTime()
+		subscription.EndDate = &endDate
+	}
+
+	id, err := h.storage.CreateSubscription(c.Request.Context(), subscription)
 	if err != nil {
 		h.logger.Error("Failed to create subscription", zap.Error(err))
-		c.JSON(500, gin.H{"error": "Internal server error"})
+		c.JSON(500, gin.H{"error": fmt.Sprintf("Internal server error %v", err)})
 		return
 	}
 
-	h.logger.Info("Subscription created")
-	c.JSON(201, subscription)
+	subscription.ID = *id
+	h.logger.Info(fmt.Sprintf("Created new subscription with ID = %d", subscription.ID))
+
+	c.JSON(201, subscription.GetResponse())
 }
 
 // GetSubscription получает подписку по ID
@@ -91,14 +99,22 @@ func (h *Handler) GetSubscription(c *gin.Context) {
 	}
 
 	subscription, err := h.storage.GetSubscriptionByID(c.Request.Context(), uint(id))
+
 	if err != nil {
+		if errors.Is(err, models.ErrSubscriptionNotFound) {
+			h.logger.Info(fmt.Sprintf("Not found subscription with ID = %d", id))
+			c.JSON(404, gin.H{"error": "Subscription not found"})
+			return
+		}
+
 		h.logger.Error("Failed to get subscription", zap.Error(err))
-		c.JSON(404, gin.H{"error": "Subscription not found"})
+		c.JSON(500, gin.H{"error": fmt.Sprintf("Couldn't get subscription with ID = %d", id)})
 		return
 	}
 
 	h.logger.Info(fmt.Sprintf("Get subscription with ID = %d", id))
-	c.JSON(200, subscription)
+
+	c.JSON(200, subscription.GetResponse())
 }
 
 // UpdateSubscription обновляет подписку
@@ -137,7 +153,7 @@ func (h *Handler) UpdateSubscription(c *gin.Context) {
 	}
 
 	h.logger.Info(fmt.Sprintf("Subscription with ID = %d updated successfully", id))
-	c.JSON(200, subscription)
+	c.JSON(200, subscription.GetResponse())
 }
 
 // DeleteSubscription удаляет подписку
@@ -191,6 +207,8 @@ func (h *Handler) ListSubscriptions(c *gin.Context) {
 	limit := c.DefaultQuery("limit", "100")
 	offset := c.DefaultQuery("offset", "0")
 
+	h.logger.Info("Get list of all subscriptions")
+
 	subscriptions, err := h.storage.ListSubscriptions(c.Request.Context(), limit, offset)
 	if err != nil {
 		h.logger.Error("Failed to list subscriptions", zap.Error(err))
@@ -198,8 +216,11 @@ func (h *Handler) ListSubscriptions(c *gin.Context) {
 		return
 	}
 
-	h.logger.Info("Get list of all subscriptions")
-	c.JSON(200, subscriptions)
+	var subscriptionResponses []models.SubscriptionResponse
+	for _, subscription := range subscriptions {
+		subscriptionResponses = append(subscriptionResponses, subscription.GetResponse())
+	}
+	c.JSON(200, subscriptionResponses)
 }
 
 // CalculateTotalCost рассчитывает суммарную стоимость подписок

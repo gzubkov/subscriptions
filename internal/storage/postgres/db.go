@@ -23,10 +23,14 @@ func NewSubscriptionStorage(db *sqlx.DB, logger *zap.Logger) *SubscriptionStorag
 	}
 }
 
-func (r *SubscriptionStorage) CreateSubscription(ctx context.Context, subscription *models.Subscription) error {
-	_, err := r.db.ExecContext(
+func (r *SubscriptionStorage) CreateSubscription(ctx context.Context, subscription *models.Subscription) (*uint, error) {
+	var id uint
+
+	// GetContext takes the destination variable, the query, and arguments
+	err := r.db.GetContext(
 		ctx,
-		`INSERT INTO subscriptions (user_id, service_name, price, start_date, end_date) VALUES ($1, $2, $3, $4, $5)`,
+		&id,
+		`INSERT INTO subscriptions (user_id, service_name, price, start_date, end_date) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 		subscription.UserID,
 		subscription.ServiceName,
 		subscription.Price,
@@ -36,10 +40,10 @@ func (r *SubscriptionStorage) CreateSubscription(ctx context.Context, subscripti
 
 	if err != nil {
 		r.logger.Error("Failed to create new subscription", zap.Error(err))
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &id, nil
 }
 
 func (r *SubscriptionStorage) GetSubscriptionByID(ctx context.Context, id uint) (*models.Subscription, error) {

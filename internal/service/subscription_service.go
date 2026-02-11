@@ -6,50 +6,51 @@ import (
 	"strconv"
 	"subscriptions/internal/models"
 	"subscriptions/internal/storage"
-	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
 type SubscriptionService interface {
-	CreateSubscription(ctx context.Context, subscription *models.Subscription) error
+	CreateSubscription(ctx context.Context, subscription *models.Subscription) (*uint, error)
 	GetSubscriptionByID(ctx context.Context, id uint) (*models.Subscription, error)
 	UpdateSubscription(ctx context.Context, id uint, req *models.UpdateSubscriptionRequest) (*models.Subscription, error)
 	DeleteSubscription(ctx context.Context, id uint) error
 	ListSubscriptions(ctx context.Context, limit, offset string) ([]models.Subscription, error)
-	CalculateSubscriptionsTotalCost(ctx context.Context, startDate, endDate time.Time, userID *uuid.UUID, serviceName *string) (uint, error)
+	CalculateSubscriptionsTotalCost(ctx context.Context, startDate, endDate models.MonthYear, userID *uuid.UUID, serviceName *string) (uint, error)
 }
 
 type subscriptionService struct {
-	repo   storage.SubscriptionStorage
-	logger *zap.Logger
+	storage storage.SubscriptionStorage
+	logger  *zap.Logger
 }
 
-func NewSubscriptionService(repo storage.SubscriptionStorage, logger *zap.Logger) SubscriptionService {
+func NewSubscriptionService(storage storage.SubscriptionStorage, logger *zap.Logger) SubscriptionService {
 	return &subscriptionService{
-		repo:   repo,
-		logger: logger,
+		storage: storage,
+		logger:  logger,
 	}
 }
 
-func (s *subscriptionService) CreateSubscription(ctx context.Context, subscription *models.Subscription) error {
+func (s *subscriptionService) CreateSubscription(ctx context.Context, subscription *models.Subscription) (*uint, error) {
 	// проверка дат (дата окончания не нулевая и идет после даты начала)
-	if subscription.EndDate != nil && subscription.EndDate.Before(subscription.StartDate) {
-		s.logger.Error("subscription end date must be after start date")
-		return errors.New("subscription end date must be after start date")
+	if subscription.EndDate != nil {
+		if subscription.EndDate.Before(subscription.StartDate) {
+			s.logger.Error("subscription end date must be after start date")
+			return nil, errors.New("subscription end date must be after start date")
+		}
 	}
 
-	return s.repo.CreateSubscription(ctx, subscription)
+	return s.storage.CreateSubscription(ctx, subscription)
 }
 
 func (s *subscriptionService) GetSubscriptionByID(ctx context.Context, id uint) (*models.Subscription, error) {
-	return s.repo.GetSubscriptionByID(ctx, id)
+	return s.storage.GetSubscriptionByID(ctx, id)
 }
 
 func (s *subscriptionService) UpdateSubscription(ctx context.Context, id uint, req *models.UpdateSubscriptionRequest) (*models.Subscription, error) {
 	// Запрашиваем подписку по id
-	subscription, err := s.repo.GetSubscriptionByID(ctx, id)
+	subscription, err := s.storage.GetSubscriptionByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -61,17 +62,21 @@ func (s *subscriptionService) UpdateSubscription(ctx context.Context, id uint, r
 	if req.Price != nil {
 		subscription.Price = *req.Price
 	}
+	if req.StartDate != nil {
+		subscription.StartDate = req.StartDate.ToTime()
+	}
+
 	if req.EndDate != nil {
+		endDate := req.EndDate.ToEndTime()
 		// Проверяем, что дата окончания позже даты начала
-		if req.EndDate.Before(subscription.StartDate) {
+		if endDate.Before(subscription.StartDate) {
 			s.logger.Error("subscription end date must be after start date")
 			return nil, errors.New("subscription end date must be after start date")
 		}
-		subscription.EndDate = req.EndDate
 	}
 
 	// Сохраняем изменения
-	err = s.repo.UpdateSubscription(ctx, subscription)
+	err = s.storage.UpdateSubscription(ctx, subscription)
 	if err != nil {
 		return nil, err
 	}
@@ -81,11 +86,11 @@ func (s *subscriptionService) UpdateSubscription(ctx context.Context, id uint, r
 
 func (s *subscriptionService) DeleteSubscription(ctx context.Context, id uint) error {
 	// Запрашиваем подписку по id
-	_, err := s.repo.GetSubscriptionByID(ctx, id)
+	_, err := s.storage.GetSubscriptionByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	return s.repo.DeleteSubscription(ctx, id)
+	return s.storage.DeleteSubscription(ctx, id)
 }
 
 func (s *subscriptionService) ListSubscriptions(ctx context.Context, limit, offset string) ([]models.Subscription, error) {
@@ -100,15 +105,19 @@ func (s *subscriptionService) ListSubscriptions(ctx context.Context, limit, offs
 		limitInt = 100
 	}
 
-	return s.repo.ListSubscriptions(ctx, uint(limitInt), uint(offsetInt))
+	s.logger.Info("Listing subscriptions")
+	return s.storage.ListSubscriptions(ctx, uint(limitInt), uint(offsetInt))
 }
 
-func (s *subscriptionService) CalculateSubscriptionsTotalCost(ctx context.Context, startDate, endDate time.Time, userID *uuid.UUID, serviceName *string) (uint, error) {
+func (s *subscriptionService) CalculateSubscriptionsTotalCost(ctx context.Context, startDate, endDate models.MonthYear, userID *uuid.UUID, serviceName *string) (uint, error) {
+	startTime := startDate.ToTime()
+	endTime := endDate.ToEndTime()
+
 	// Проверяем, что даты корректны
-	if endDate.Before(startDate) {
+	if endTime.Before(startTime) {
 		s.logger.Error("subscription end date must be after start date")
 		return 0, errors.New("subscription end date must be after start date")
 	}
 
-	return s.repo.CalculateSubscriptionsTotalCost(ctx, startDate, endDate, userID, serviceName)
+	return s.storage.CalculateSubscriptionsTotalCost(ctx, startTime, endTime, userID, serviceName)
 }

@@ -9,7 +9,7 @@ import (
 )
 
 type SubscriptionStorage interface {
-	CreateSubscription(ctx context.Context, subscription *models.Subscription) error
+	CreateSubscription(ctx context.Context, subscription *models.Subscription) (*uint, error)
 	GetSubscriptionByID(ctx context.Context, id uint) (*models.Subscription, error)
 	UpdateSubscription(ctx context.Context, subscription *models.Subscription) error
 	DeleteSubscription(ctx context.Context, id uint) error
