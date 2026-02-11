@@ -19,7 +19,6 @@ func NewPostgresConnection(cfg config.DBConfig) (*sqlx.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	defer db.Close()
 
 	// Проверяем соединение
 	if err := db.Ping(); err != nil {
