@@ -114,12 +114,26 @@ func (r *SubscriptionStorage) CalculateSubscriptionsTotalCost(
 	userID *uuid.UUID,
 	serviceName *string,
 ) (uint, error) {
+	// SQL запрос с правильным подсчетом месяцев
 	query := `
-  SELECT COALESCE(SUM(price), 0) as total_cost
-  FROM subscriptions
-  WHERE start_date <= $2
-   AND (end_date >= $1 OR end_date IS NULL)
- `
+        SELECT COALESCE(SUM(
+            price * 
+            -- Вычисляем количество месяцев активной подписки в заданном периоде
+            GREATEST(
+                0,
+                -- Количество месяцев между максимальной датой начала и минимальной датой окончания
+                EXTRACT(YEAR FROM LEAST(COALESCE(end_date, $2), $2)) * 12 + 
+                EXTRACT(MONTH FROM LEAST(COALESCE(end_date, $2), $2)) -
+                EXTRACT(YEAR FROM GREATEST(start_date, $1)) * 12 -
+                EXTRACT(MONTH FROM GREATEST(start_date, $1)) + 1
+            )
+        ), 0) as total_cost
+        FROM subscriptions
+        WHERE 
+            -- Подписка активна в запрошенный период
+            start_date <= $2 
+            AND (end_date IS NULL OR end_date >= $1)
+    `
 
 	args := []interface{}{startDate, endDate}
 	argIndex := 3
@@ -138,9 +152,17 @@ func (r *SubscriptionStorage) CalculateSubscriptionsTotalCost(
 	var totalCost uint
 	err := r.db.GetContext(ctx, &totalCost, query, args...)
 	if err != nil {
-		r.logger.Error("Failed to calculate total cost", zap.Error(err))
-		return 0, err
+		r.logger.Error("Failed to calculate total cost",
+			zap.Error(err),
+			zap.Time("start_date", startDate),
+			zap.Time("end_date", endDate))
+		return 0, fmt.Errorf("failed to calculate total cost: %w", err)
 	}
+
+	r.logger.Debug("Total cost calculated",
+		zap.Uint("total_cost", totalCost),
+		zap.Time("start_date", startDate),
+		zap.Time("end_date", endDate))
 
 	return totalCost, nil
 }

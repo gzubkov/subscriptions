@@ -58,9 +58,13 @@ func main() {
 	// Инициализация HTTP обработчиков
 	handler := api.NewHandler(subscriptionService, appLogger)
 
+	// Force log's color
+	gin.ForceConsoleColor()
+
 	// Инициализация gin роутера
 	router := gin.Default()
 
+	// Set mode
 	if cfg.LogLevel != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -97,12 +101,6 @@ func main() {
 		})
 	})
 
-	// Запуск сервера
-	/*	appLogger.Info("Starting server on port " + cfg.HTTP.Port)
-		if err := router.Run(":" + cfg.HTTP.Port); err != nil {
-			appLogger.Fatal("Failed to start server", zap.Error(err))
-		}
-	*/
 	// Запуск сервера с graceful shutdown
 	srv := &http.Server{
 		Addr:    ":" + cfg.HTTP.Port,
